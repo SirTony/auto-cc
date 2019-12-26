@@ -1,0 +1,17 @@
+[package]
+name    = "auto-cc"
+version = "0.1.0"
+authors = [ "SirTony" ]
+edition = "2018"
+readme  = "README.md"
+license = "MIT"
+
+description   = "A small utility to perform automatic cycle collections with bacon_rajan_cc."
+homepage      = "https://github.com/SirTony/auto-cc"
+repository    = "https://github.com/SirTony/auto-cc"
+documentation = "https://docs.rs/crate/auto-cc/"
+
+keywords=[ "cc", "gc", "mark", "sweep", "garbage" ]
+
+[dependencies]
+bacon_rajan_cc = "0.3.0"
