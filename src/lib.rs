@@ -1,44 +1,65 @@
-extern crate bacon_rajan_cc;
+//! A small utility function to perform automatic collections with [`bacon_rajan_cc`](../bacon_rajan_cc/index.html).
 
-pub use bacon_rajan_cc::*;
+pub extern crate bacon_rajan_cc;
 
-use std::cell::RefCell;
+use bacon_rajan_cc::{
+    Cc,
+    Trace,
+    number_of_roots_buffered,
+    collect_cycles,
+};
 
-const ROOT_RATIO:    f64   = 0.75;
-const INITIAL_ROOTS: usize = 128;
+const CC_MAX_ROOTS: usize = 128;
 
-thread_local!( static MAX_ROOTS: RefCell<usize> = RefCell::new( INITIAL_ROOTS ) );
-
-/// Wraps `Cc::new` with some logic to automatically track the number of allocated
-/// objects and perform a collection when needed.
+/// Wraps [`Cc::new`](struct.Cc.html) with some logic to automatically track the number of root objects in a garbage cycle
+/// and automatically collecting them when needed.
 /// 
-/// This function will perform a collection _before_ allocating a new `Cc::new`,
-/// so it is recommended to manually call `collect_cycles` after any code
+/// This function allows a maximum of `128` buffered roots before triggering a collection.
+/// 
+/// This function will perform a collection _before_ allocating a new [`Cc::new`](struct.Cc.html),
+/// so it is recommended to manually call [`collect_cycles`](collect/fn.collect_cycles.html) after any code
 /// where cycles are likely to be created has finished to perform final cleanup.
+/// 
+/// This function is meant to be a drop-in replacement for [`Cc::new`](struct.Cc.html) where needed,
+/// but does not modify or otherwise touch [`Cc<T>`](struct.Cc.html).
+/// 
+/// [`Cc::new`](struct.Cc.html) should be preferred unless it is known that an arbitrary number of cycles
+/// are likely to be created outside of the programmer's control and cleaning them up during normal
+/// execution is desirable.
+/// 
+/// # Example
+/// ```rust
+/// use auto_cc::cc;
+/// 
+/// let x = cc( 42u8 );
+/// ```
+#[inline( always )]
 pub fn cc<T: Trace>( value: T ) -> Cc<T> {
-    // first, check the number of roots the cycle collector knows about ...
-    MAX_ROOTS.with( | roots | {
-        let mut roots = roots.borrow_mut();
+    if number_of_roots_buffered() >= CC_MAX_ROOTS {
+        collect_cycles();
+    }
 
-        // ... if the number of roots meets or exceeds the maximum allowed ...
-        if number_of_roots_buffered() >= *roots {
-            // ... then perform a collection ...
-            collect_cycles();
-
-            // if the number of roots still isn't below threshhold, increase the threshold.
-            if ( number_of_roots_buffered() as f64 ) > ( ( *roots as f64 ) * ROOT_RATIO ) {
-                *roots = ( ( *roots as f64 ) / ROOT_RATIO ) as usize;
-            }
-        }
-    } );
-
-    // finally, create and return our value
     Cc::new( value )
 }
 
+
 #[cfg( test )]
 mod tests {
-    use super::*;
+    use std::cell::RefCell;
+
+    use super::{
+        CC_MAX_ROOTS,
+
+        Trace,
+        Cc,
+        cc,
+
+        bacon_rajan_cc::{
+            Tracer,
+            number_of_roots_buffered,
+            collect_cycles
+        },
+    };
 
     fn create_cycle() {
         struct List( Vec<Cc<RefCell<List>>> );
@@ -72,12 +93,12 @@ mod tests {
         // each cycle has 2 items, so we create exactly INITIAL_ROOTS `Cc` objects
         // putting us right at the collection threshold so the next cycle created
         // will trip automatic collection
-        for _ in 0 .. INITIAL_ROOTS / 2 {
+        for _ in 0 .. CC_MAX_ROOTS / 2 {
             create_cycle();
         }
 
         // verify we have all of our dead cycles
-        assert_eq!( number_of_roots_buffered(), INITIAL_ROOTS, "before collection" );
+        assert_eq!( number_of_roots_buffered(), CC_MAX_ROOTS, "before collection" );
 
         // creating another cycle should trip automatic collection
         create_cycle();
